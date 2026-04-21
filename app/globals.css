@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --bg-gray:#f2f3f8;
 }
 
 @theme inline {
@@ -16,11 +17,32 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --bg-gray:#f2f3f8
   }
 }
 
 body {
-  background: var(--background);
+  background: var(--bg-gray);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+.custom-container{
+  padding-inline: calc(15px + 145 * (100vw - 320px) / 1600);
+}
+.main-header{
+  padding-block: calc(10px + 5 * (100vw - 320px) / 1600);
+}
+.main-side-bar{
+  .MuiCollapse-root{
+    max-height: 240px;
+    overflow-y: auto;
+    .MuiTypography-root{
+      width: 100%;
+    }
+  };
+}
+.products-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
 }
