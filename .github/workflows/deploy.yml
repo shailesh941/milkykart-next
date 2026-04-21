@@ -32,10 +32,16 @@ jobs:
       - name: Create deployment package
         run: |
           mkdir -p deploy
+
+          # Next.js build output
           cp -r .next deploy/
           cp -r public deploy/
+
+          # configs
           cp package*.json deploy/
           cp ecosystem.config.js deploy/
+          cp next.config.* deploy/ 2>/dev/null || true
+
           tar -czf deploy.tar.gz -C deploy .
 
       - name: Upload artifact
@@ -65,38 +71,31 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > key.pem
           chmod 600 key.pem
 
-          scp -i key.pem -o StrictHostKeyChecking=no deploy.tar.gz \
-            ${EC2_USERNAME}@${EC2_HOST}:/tmp/
+          # Upload directly to project folder (NOT /tmp)
+          scp -i key.pem -o StrictHostKeyChecking=no \
+            deploy.tar.gz ${EC2_USERNAME}@${EC2_HOST}:/var/www/milkykart-next/
 
           ssh -i key.pem -o StrictHostKeyChecking=no \
             ${EC2_USERNAME}@${EC2_HOST} << 'EOF'
 
             cd /var/www/milkykart-next
 
-            echo "Fix permissions..."
-            sudo chown -R $USER:$USER .
+            echo "🔹 Freeing space..."
+            rm -rf .next node_modules
+            rm -f deploy.tar.gz
+            sudo rm -rf /tmp/*
+            sudo rm -rf /var/log/*
 
-            echo "Backup current version..."
-            mkdir -p backups
-            tar -czf backups/backup_$(date +%s).tar.gz .next package.json ecosystem.config.js 2>/dev/null || true
+            echo "🔹 Extract new build..."
+            tar -xzf deploy.tar.gz -C .
+            rm deploy.tar.gz
 
-            echo "Extract new build..."
-            tar --overwrite -xzf /tmp/deploy.tar.gz -C .
-            rm /tmp/deploy.tar.gz
+            echo "🔹 Install dependencies (with dev for Tailwind)..."
+            npm ci
 
-            echo "Install dependencies..."
-            npm ci --omit=dev
-
-            echo "Ensure .env exists..."
-            [ ! -f .env ] && echo "PORT=3000" > .env
-
-            echo "Restart PM2..."
-            if pm2 describe milkykart-next > /dev/null; then
-              pm2 reload ecosystem.config.js --update-env
-            else
-              pm2 start ecosystem.config.js
-            fi
-
+            echo "🔹 Restart PM2..."
+            pm2 delete milkykart-next || true
+            pm2 start ecosystem.config.js
             pm2 save
 
           EOF
@@ -107,5 +106,6 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
+          echo "Waiting for app..."
           sleep 10
           curl -I http://${EC2_HOST}
