@@ -8,7 +8,7 @@ export default function ClientProvider({ children }: any) {
   const initAuth = useAuthStore((s) => s.initAuth)
 
   useEffect(() => {
-    initAuth()
+    //initAuth()
   }, [])
 
   return children
