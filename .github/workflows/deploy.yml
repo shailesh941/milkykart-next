@@ -32,16 +32,11 @@ jobs:
       - name: Create deployment package
         run: |
           mkdir -p deploy
-
-          # Next.js build output
           cp -r .next deploy/
           cp -r public deploy/
-
-          # configs
           cp package*.json deploy/
           cp ecosystem.config.js deploy/
           cp next.config.* deploy/ 2>/dev/null || true
-
           tar -czf deploy.tar.gz -C deploy .
 
       - name: Upload artifact
@@ -62,6 +57,36 @@ jobs:
         with:
           name: deployment-package
 
+      # ✅ PRE-CLEAN BEFORE SCP (IMPORTANT FIX)
+      - name: Pre-clean EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          echo "$SSH_PRIVATE_KEY" > key.pem
+          chmod 600 key.pem
+
+          ssh -i key.pem -o StrictHostKeyChecking=no \
+            ${EC2_USERNAME}@${EC2_HOST} << 'EOF'
+
+            echo "🔹 Pre-cleaning server..."
+
+            cd /var/www/milkykart-next || exit
+
+            rm -rf .next node_modules
+            rm -f deploy.tar.gz
+            sudo rm -rf /tmp/*
+            sudo rm -rf /var/log/*
+            npm cache clean --force || true
+
+            echo "✅ Cleanup complete"
+
+          EOF
+
+          rm key.pem
+
+      # 🚀 DEPLOY AFTER CLEANUP
       - name: Deploy via SSH
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -71,7 +96,6 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > key.pem
           chmod 600 key.pem
 
-          # Upload directly to project folder (NOT /tmp)
           scp -i key.pem -o StrictHostKeyChecking=no \
             deploy.tar.gz ${EC2_USERNAME}@${EC2_HOST}:/var/www/milkykart-next/
 
@@ -80,17 +104,11 @@ jobs:
 
             cd /var/www/milkykart-next
 
-            echo "🔹 Freeing space..."
-            rm -rf .next node_modules
-            rm -f deploy.tar.gz
-            sudo rm -rf /tmp/*
-            sudo rm -rf /var/log/*
-
             echo "🔹 Extract new build..."
             tar -xzf deploy.tar.gz -C .
             rm deploy.tar.gz
 
-            echo "🔹 Install dependencies (with dev for Tailwind)..."
+            echo "🔹 Install dependencies..."
             npm ci
 
             echo "🔹 Restart PM2..."
