@@ -36,7 +36,6 @@ jobs:
           cp -r public deploy/
           cp package*.json deploy/
           cp ecosystem.config.js deploy/
-          cp next.config.* deploy/ 2>/dev/null || true
           tar -czf deploy.tar.gz -C deploy .
 
       - name: Upload artifact
