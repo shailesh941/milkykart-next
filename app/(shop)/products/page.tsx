@@ -15,17 +15,13 @@ import { useAxiosGet } from "@/shared/utility/useAxios";
 export default function Page() {
     const addToCart = useCartStore((state) => state.addToCart)
     const { data, loading, error } = useAxiosGet('/products')
-    const [products, setProducts] = useState<Object[]>(data);
+    const [products, setProducts] = useState<any>(data);
 
     if (loading) return <p>Loading...</p>
     if (error) return <p>Error: {error}</p>
-    // useEffect(() => {
-    //   const timer = setTimeout(() => { /* action */ }, 1000);
-
-    //   setProducts(data)
-
-    //   return () => clearTimeout(timer); // Prevents timer from firing after unmount
-    // }, []);
+    useEffect(() => {
+      setProducts(data)
+    }, []);
   return (
     <div className="custom-container p-4">
         <div className="grid grid-cols-14 gap-4">
@@ -34,7 +30,7 @@ export default function Page() {
             </div>
             <div className="col-span-11">
               <div className="products-grid-container">
-                  {data.length > 0 && data.map((p:any) => (
+                  {products.length > 0 && products.map((p:any) => (
                       <ProductCard key={p.id} product={p} />
                   ))}
                 </div>
