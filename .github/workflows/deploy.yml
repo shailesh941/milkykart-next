@@ -10,120 +10,99 @@ env:
 
 jobs:
   build:
-    name: Build Application
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js 24
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24.15.0
           cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+      - run: npm run build
 
-      - name: Build Next.js app
-        run: npm run build
-
-      - name: Create deployment package
+      - name: Package build
         run: |
           mkdir -p deploy
           cp -r .next deploy/
           cp -r public deploy/
           cp package*.json deploy/
           cp ecosystem.config.js deploy/
-          cp next.config.* deploy/ 2>/dev/null || true
           tar -czf deploy.tar.gz -C deploy .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: deployment-package
+          name: build
           path: deploy.tar.gz
-          retention-days: 1
 
   deploy:
-    name: Deploy to EC2
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: deployment-package
+          name: build
 
-      # ✅ PRE-CLEAN BEFORE SCP (IMPORTANT FIX)
+      # ✅ CLEAN FIRST (important)
       - name: Pre-clean EC2
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USERNAME }}
+          KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "$SSH_PRIVATE_KEY" > key.pem
+          echo "$KEY" > key.pem
           chmod 600 key.pem
 
-          ssh -i key.pem -o StrictHostKeyChecking=no \
-            ${EC2_USERNAME}@${EC2_HOST} << 'EOF'
+          ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
+            cd /var/www/milkykart-next
 
-            echo "🔹 Pre-cleaning server..."
-
-            cd /var/www/milkykart-next || exit
-
-            rm -rf .next node_modules
+            rm -rf .next
             rm -f deploy.tar.gz
             sudo rm -rf /tmp/*
             sudo rm -rf /var/log/*
-            npm cache clean --force || true
-
-            echo "✅ Cleanup complete"
-
           EOF
 
-          rm key.pem
-
-      # 🚀 DEPLOY AFTER CLEANUP
-      - name: Deploy via SSH
+      # 🚀 DEPLOY
+      - name: Deploy
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USERNAME }}
+          KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "$SSH_PRIVATE_KEY" > key.pem
+          echo "$KEY" > key.pem
           chmod 600 key.pem
 
           scp -i key.pem -o StrictHostKeyChecking=no \
-            deploy.tar.gz ${EC2_USERNAME}@${EC2_HOST}:/var/www/milkykart-next/
+            deploy.tar.gz $USER@$HOST:/var/www/milkykart-next/
 
-          ssh -i key.pem -o StrictHostKeyChecking=no \
-            ${EC2_USERNAME}@${EC2_HOST} << 'EOF'
-
+          ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/milkykart-next
 
-            echo "🔹 Extract new build..."
-            tar -xzf deploy.tar.gz -C .
+            tar -xzf deploy.tar.gz
             rm deploy.tar.gz
 
-            echo "🔹 Install dependencies..."
-            npm ci
+            # install runtime deps only
+            npm install --omit=dev
 
-            echo "🔹 Restart PM2..."
-            pm2 delete milkykart-next || true
-            pm2 start ecosystem.config.js
+            # fix permissions
+            sudo chown -R $USER:$USER /var/www/milkykart-next
+
+            # start app
+            if pm2 describe milkykart-next > /dev/null 2>&1; then
+              pm2 reload ecosystem.config.js
+            else
+              pm2 start ecosystem.config.js
+            fi
+
             pm2 save
-
           EOF
 
-          rm key.pem
-
-      - name: Verify deployment
+      - name: Verify
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          HOST: ${{ secrets.EC2_HOST }}
         run: |
-          echo "Waiting for app..."
           sleep 10
-          curl -I http://${EC2_HOST}
+          curl -I http://$HOST
