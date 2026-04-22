@@ -66,7 +66,7 @@ export default function Header() {
         {/* Logo */}
         <div className="text-2xl font-bold flex items-center gap-1">
             <Link href="/" className="text-xl text-white font-bold">
-             🛒 MyStore Shailesh Add
+             🛒 MyStore Lala
             </Link>
           {/* <span className="bg-yellow-400 text-blue-700 px-2 rounded">K</span>
           <span>Kartify</span> */}
