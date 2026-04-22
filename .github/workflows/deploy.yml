@@ -16,27 +16,28 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24   # 🔥 stable (Node 24 can cause issues)
           cache: "npm"
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
       - name: Build Next.js
         run: npm run build
 
-      # 🔍 Debug (VERY IMPORTANT)
+      # 🔍 DEBUG (helps confirm new build)
       - name: Show BUILD_ID
         run: cat .next/BUILD_ID
 
       - name: Package build
         run: |
-          mkdir deploy
+          mkdir -p deploy
 
           cp -r .next deploy/
           cp -r public deploy/
           cp package*.json deploy/
           cp ecosystem.config.js deploy/
+          cp next.config.* deploy/ 2>/dev/null || true
 
           tar -czf deploy.tar.gz -C deploy .
 
@@ -45,6 +46,7 @@ jobs:
         with:
           name: build
           path: deploy.tar.gz
+          retention-days: 1
 
   deploy:
     needs: build
@@ -56,7 +58,7 @@ jobs:
         with:
           name: build
 
-      # 🔥 CLEAN + BACKUP (SAFE)
+      # 🔥 PRE-CLEAN + BACKUP (SAFE)
       - name: Pre-clean EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
@@ -75,18 +77,21 @@ jobs:
 
             tar -czf backups/backup_$ts.tar.gz .next 2>/dev/null || true
 
+            # keep last 5 backups only
+            ls -t backups/*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm
+
             echo "🔹 Clean old build..."
             rm -rf .next
             rm -f deploy.tar.gz
 
-            echo "🔹 Free space..."
+            echo "🔹 Free npm cache..."
             npm cache clean --force || true
           EOF
 
           rm key.pem
 
       # 🚀 DEPLOY
-      - name: Deploy
+      - name: Deploy to EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
           USER: ${{ secrets.EC2_USERNAME }}
@@ -95,38 +100,59 @@ jobs:
           echo "$KEY" > key.pem
           chmod 600 key.pem
 
-          scp -i key.pem -o StrictHostKeyChecking=no deploy.tar.gz $USER@$HOST:/var/www/next-app/
+          scp -i key.pem -o StrictHostKeyChecking=no \
+            deploy.tar.gz $USER@$HOST:/var/www/next-app/
 
           ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/next-app || exit
 
-            echo "📦 Extract build..."
+            echo "🔹 Extract new build..."
+            rm -rf .next   # 🔥 ensure no old build
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
 
-            echo "📦 Install runtime deps..."
+            echo "🔹 Install runtime deps..."
             npm install --omit=dev
 
-            echo "🔁 Restart app (FORCE)..."
+            echo "🔹 Fix permissions..."
+            sudo chown -R $USER:$USER /var/www/next-app
+
+            echo "🔹 Verify build..."
+            cat .next/BUILD_ID || echo "❌ BUILD_ID missing"
+
+            echo "🔹 Restart PM2 (clean)..."
             pm2 delete next-app || true
-            pm2 start ecosystem.config.js
+            pm2 start ecosystem.config.js --name next-app
             pm2 save
 
-            echo "🔁 Restart nginx..."
+            echo "🔹 Restart Nginx..."
             sudo systemctl restart nginx || true
 
-            echo "🔍 Check BUILD_ID:"
-            cat .next/BUILD_ID
+            echo "✅ Deployment complete"
           EOF
 
           rm key.pem
 
-      # 🔍 VERIFY LIVE
-      - name: Verify
+      # 🔍 VERIFY
+      - name: Verify deployment
         env:
           HOST: ${{ secrets.EC2_HOST }}
         run: |
-          echo "⏳ Waiting..."
+          echo "⏳ Waiting for app..."
           sleep 10
 
-          curl -I http://$HOST
+          for i in {1..3}; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST || echo "000")
+
+            echo "Attempt $i → Status: $status"
+
+            if [ "$status" = "200" ] || [ "$status" = "301" ] || [ "$status" = "302" ]; then
+              echo "✅ App is live!"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "❌ Deployment failed"
+          exit 1
