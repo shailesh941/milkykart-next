@@ -125,7 +125,7 @@ jobs:
             cat .next/BUILD_ID || exit 1
 
             echo "📦 Installing dependencies..."
-            npm install --omit=dev || exit 1
+            npm install || exit 1
 
             echo "🔧 Fixing permissions..."
             sudo chown -R $USER:$USER /var/www/next-app
