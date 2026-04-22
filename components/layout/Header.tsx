@@ -144,7 +144,7 @@ export default function Header() {
         <div className="flex items-center gap-4 text-sm">
           <span>Recent Viewer ▾</span>
           <span>|</span>
-          <span>Order Tracking (Shailesh Kumar)</span>
+          <span>Order Tracking</span>
         </div>
       </div>
     </div>
