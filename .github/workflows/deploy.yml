@@ -59,7 +59,7 @@ jobs:
           name: build
 
       # 🔥 PRE-CLEAN (safe version)
-      - name: Pre-clean EC2
+      - name: Pre-clean EC2 (with backup)
         env:
           HOST: ${{ secrets.EC2_HOST }}
           USER: ${{ secrets.EC2_USERNAME }}
@@ -71,12 +71,25 @@ jobs:
           ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/next-app || exit
 
+            echo "🔹 Creating backup..."
+
+            mkdir -p backups
+
+            timestamp=$(date +%Y%m%d_%H%M%S)
+
+            # create backup (ignore missing files safely)
+            tar -czf backups/backup_${timestamp}.tar.gz \
+              .next public package.json ecosystem.config.js 2>/dev/null || true
+
+            echo "📦 Backup created: backups/backup_${timestamp}.tar.gz"
+
+            # keep only last 5 backups
+            ls -t backups/backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm
+
             echo "🔹 Cleaning old build..."
-            rm -rf .next
-            rm -rf node_modules
+            rm -rf .next node_modules
             rm -f deploy.tar.gz
 
-            # SAFE cleanup (not breaking system)
             npm cache clean --force || true
 
             echo "✅ Cleanup done"
