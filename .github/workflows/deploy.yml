@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24   # 🔥 stable (Node 24 can cause issues)
+          node-version: 24.15.0
           cache: "npm"
 
       - name: Install deps
@@ -25,7 +25,7 @@ jobs:
       - name: Build Next.js
         run: npm run build
 
-      # 🔍 DEBUG (helps confirm new build)
+      # 🔍 DEBUG BUILD ID
       - name: Show BUILD_ID
         run: cat .next/BUILD_ID
 
@@ -58,7 +58,7 @@ jobs:
         with:
           name: build
 
-      # 🔥 PRE-CLEAN + BACKUP (SAFE)
+      # 🔥 PRE-CLEAN + BACKUP
       - name: Pre-clean EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
@@ -71,20 +71,20 @@ jobs:
           ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/next-app || exit
 
-            echo "🔹 Backup current build..."
+            echo "🔹 Creating backup..."
             mkdir -p backups
             ts=$(date +%Y%m%d_%H%M%S)
 
             tar -czf backups/backup_$ts.tar.gz .next 2>/dev/null || true
 
-            # keep last 5 backups only
+            # keep last 5 backups
             ls -t backups/*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm
 
-            echo "🔹 Clean old build..."
+            echo "🔹 Cleaning old build..."
             rm -rf .next
             rm -f deploy.tar.gz
 
-            echo "🔹 Free npm cache..."
+            echo "🔹 Cleaning npm cache..."
             npm cache clean --force || true
           EOF
 
@@ -100,35 +100,45 @@ jobs:
           echo "$KEY" > key.pem
           chmod 600 key.pem
 
+          echo "📤 Uploading build..."
           scp -i key.pem -o StrictHostKeyChecking=no \
             deploy.tar.gz $USER@$HOST:/var/www/next-app/
 
           ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/next-app || exit
 
-            echo "🔹 Extract new build..."
-            rm -rf .next   # 🔥 ensure no old build
-            tar -xzf deploy.tar.gz
+            echo "📦 Checking uploaded file..."
+            ls -lh deploy.tar.gz || exit 1
+
+            echo "📦 Validating archive..."
+            tar -tzf deploy.tar.gz | head || exit 1
+
+            echo "🔥 Removing old build..."
+            rm -rf .next
+
+            echo "📦 Extracting new build..."
+            tar -xzf deploy.tar.gz || exit 1
             rm deploy.tar.gz
 
-            echo "🔹 Install runtime deps..."
-            npm install --omit=dev
+            echo "🔍 Verifying build..."
+            ls -la .next || exit 1
+            cat .next/BUILD_ID || exit 1
 
-            echo "🔹 Fix permissions..."
+            echo "📦 Installing dependencies..."
+            npm install --omit=dev || exit 1
+
+            echo "🔧 Fixing permissions..."
             sudo chown -R $USER:$USER /var/www/next-app
 
-            echo "🔹 Verify build..."
-            cat .next/BUILD_ID || echo "❌ BUILD_ID missing"
-
-            echo "🔹 Restart PM2 (clean)..."
+            echo "🔁 Restarting PM2..."
             pm2 delete next-app || true
             pm2 start ecosystem.config.js --name next-app
             pm2 save
 
-            echo "🔹 Restart Nginx..."
+            echo "🔁 Restarting Nginx..."
             sudo systemctl restart nginx || true
 
-            echo "✅ Deployment complete"
+            echo "✅ Deployment completed successfully"
           EOF
 
           rm key.pem
