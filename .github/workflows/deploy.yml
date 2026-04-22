@@ -32,7 +32,6 @@ jobs:
         run: |
           mkdir -p deploy
 
-          # Copy required files
           cp -r .next deploy/
           cp -r public deploy/
           cp package*.json deploy/
@@ -58,7 +57,7 @@ jobs:
         with:
           name: build
 
-      # 🔥 PRE-CLEAN (safe version)
+      # 🔥 PRE-CLEAN + BACKUP
       - name: Pre-clean EC2 (with backup)
         env:
           HOST: ${{ secrets.EC2_HOST }}
@@ -72,27 +71,19 @@ jobs:
             cd /var/www/next-app || exit
 
             echo "🔹 Creating backup..."
-
             mkdir -p backups
-
             timestamp=$(date +%Y%m%d_%H%M%S)
 
-            # create backup (ignore missing files safely)
             tar -czf backups/backup_${timestamp}.tar.gz \
               .next public package.json ecosystem.config.js 2>/dev/null || true
 
-            echo "📦 Backup created: backups/backup_${timestamp}.tar.gz"
-
-            # keep only last 5 backups
-            ls -t backups/backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm
+            ls -t backups/*.tar.gz | tail -n +6 | xargs -r rm
 
             echo "🔹 Cleaning old build..."
             rm -rf .next node_modules
             rm -f deploy.tar.gz
 
             npm cache clean --force || true
-
-            echo "✅ Cleanup done"
           EOF
 
           rm key.pem
@@ -107,15 +98,14 @@ jobs:
           echo "$KEY" > key.pem
           chmod 600 key.pem
 
-          # Upload
           scp -i key.pem -o StrictHostKeyChecking=no \
             deploy.tar.gz $USER@$HOST:/var/www/next-app/
 
-          # SSH deploy
           ssh -i key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
             cd /var/www/next-app || exit
 
             echo "🔹 Extract new build..."
+            rm -rf .next   # 🔥 FORCE REMOVE AGAIN (important)
             tar --overwrite -xzf deploy.tar.gz
             rm deploy.tar.gz
 
@@ -129,10 +119,13 @@ jobs:
             ls -la .next
             cat .next/BUILD_ID || echo "❌ BUILD_ID missing"
 
-            echo "🔹 Restart PM2..."
+            echo "🔹 Restart PM2 (force refresh)..."
             pm2 delete next-app || true
             pm2 start ecosystem.config.js
             pm2 save
+
+            echo "🔹 Restart Nginx..."
+            sudo systemctl restart nginx || true
 
             echo "✅ Deployment done"
           EOF
