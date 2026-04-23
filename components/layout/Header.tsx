@@ -97,7 +97,7 @@ export default function Header() {
             <Phone size={18} />
             <div>
               <p className="text-xs">Call us now</p>
-              <p className="font-semibold">+1 917 376 8944</p>
+              <p className="font-semibold">000-000-0000</p>
             </div>
           </div>
 
